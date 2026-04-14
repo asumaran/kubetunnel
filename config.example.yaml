@@ -1,0 +1,67 @@
+# kubetunnel — example configuration.
+#
+# Paths support `~` expansion. Install with:
+#   mkdir -p ~/.config/kubetunnel
+#   cp config.example.yaml ~/.config/kubetunnel/config.yaml
+
+tls:
+  cert_dir: ~/.local/share/kubetunnel/certs
+  listen_addr: "127.0.0.1:443"
+
+control:
+  socket: /var/run/kubetunnel.sock
+
+logging:
+  dir: ~/Library/Logs/kubetunnel
+  max_size_mb: 10
+  max_files: 5
+  max_age_days: 30
+  compress: true
+
+access_log:
+  enabled: true
+
+# When the daemon runs under launchd (as root) it inherits a minimal PATH and
+# will not see tools installed under your user profile, e.g. the gcloud SDK
+# auth plugins. Prepend any extra directories kubectl needs here. These are
+# passed to every kubectl subprocess.
+environment:
+  path_additions:
+    - /usr/local/share/google-cloud-sdk/bin
+    - /opt/homebrew/share/google-cloud-sdk/bin
+  extra:
+    USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
+
+tunnels:
+  - name: api
+    hostname: api.staging.internal.example.com
+    kube_context: gke_my-project_us-central1_staging
+    namespace: staging
+    target: svc/api-gateway
+    remote_port: 80
+    local_port: 19001
+    # No health_check: a generic probe would hit an endpoint the app does not
+    # implement and get killed in a loop. Add one only when the target has a
+    # dedicated /healthz route.
+
+  - name: web-a
+    hostname: web-a.staging.internal.example.com
+    kube_context: gke_my-project_us-central1_staging
+    namespace: staging
+    target: svc/web-frontend-a
+    remote_port: 80
+    local_port: 19002
+    health_check:
+      path: /api/health
+      interval: 30s
+
+  - name: web-b
+    hostname: web-b.staging.internal.example.com
+    kube_context: gke_my-project_us-central1_staging
+    namespace: staging
+    target: svc/web-frontend-b
+    remote_port: 80
+    local_port: 19003
+    health_check:
+      path: /api/health
+      interval: 30s
