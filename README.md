@@ -30,35 +30,27 @@ The end result: you forget the thing is there until you need to look at it.
 ## How it works
 
 ```mermaid
-flowchart LR
-    Browser["Your browser<br/>https://api.staging.internal.example.com"]
-    Hosts[/"/etc/hosts<br/>→ 127.0.0.1"/]
-    Browser -.resolves via.-> Hosts
+flowchart TB
+    Browser["Browser<br/>opens https://api.staging.example.com"]
+    Hosts[/"/etc/hosts hijack<br/>hostname resolves to 127.0.0.1"/]
+    Proxy["Local HTTPS reverse proxy on :443<br/>with a mkcert-issued cert the OS trusts"]
+    Sup["Supervisor<br/>routes by Host header and keeps<br/>kubectl alive with backoff + health checks"]
+    KC["kubectl port-forward<br/>one long-lived process per tunnel"]
+    Cluster[("Remote Kubernetes cluster<br/>pods behind IAP / geo-block")]
 
-    subgraph Daemon["kubetunneld — launchd-managed, runs as root"]
-        direction TB
-        Proxy["HTTPS reverse proxy on :443<br/>• SNI cert from mkcert<br/>• host-based routing<br/>• preserves Host header<br/>• 503 fallback when not ready<br/>• per-request access log"]
-        Supervisor["Supervisor<br/>• one goroutine per tunnel<br/>• state machine<br/>• exponential backoff + jitter<br/>• readiness from kubectl stdout<br/>• optional health checks<br/>• failure isolation"]
-        Control["Control socket<br/>/var/run/kubetunnel.sock<br/>• JSON API<br/>• SSE log stream<br/>• SSE status events"]
-        Logger["Structured logger<br/>daemon.log / access.log / kubectl.log<br/>+ in-memory ring buffers"]
-        Proxy <-->|"routes to<br/>127.0.0.1:Nxxxx"| Supervisor
-        Proxy --> Logger
-        Supervisor --> Logger
-        Supervisor --> Control
-        Logger --> Control
-    end
+    Browser -->|"1. DNS"| Hosts
+    Hosts -->|"2. 127.0.0.1"| Browser
+    Browser -->|"3. HTTPS request"| Proxy
+    Proxy -->|"4. pick tunnel"| Sup
+    Sup -->|"5. forward to local port"| KC
+    KC -->|"6. tunnel via kube API"| Cluster
 
-    Browser ==>|"TLS<br/>on :443"| Proxy
-    Supervisor ==>|"spawns"| Kubectl1["kubectl port-forward<br/>svc/api-gateway 19001:80"]
-    Supervisor ==>|"spawns"| Kubectl2["kubectl port-forward<br/>svc/web-frontend 19002:80"]
-    Kubectl1 --> Pod1[("remote pod<br/>via GKE API")]
-    Kubectl2 --> Pod2[("remote pod<br/>via GKE API")]
-
-    TUI["tunnelctl dashboard<br/>(Bubble Tea TUI)"]
-    CLI["tunnelctl status / logs / restart / reload"]
-    TUI <-->|"SSE + JSON"| Control
-    CLI <-->|"JSON"| Control
+    style Proxy fill:#7aa2f7,stroke:#3d59a1,color:#1a1b26
 ```
+
+The trick is two-fold. First, `/etc/hosts` makes the OS believe that the real hostname lives on your own machine, so the browser connects to **127.0.0.1** instead of the internet. Second, a local HTTPS reverse proxy answers on `:443` with a cert the system keychain already trusts (courtesy of [`mkcert`](https://github.com/FiloSottile/mkcert)), looks at the `Host` header to pick the right backend, and hands the request to a `kubectl port-forward` that the supervisor keeps alive 24/7. From the browser's point of view nothing is different; from the pod's point of view the request arrives with the real `Host` header, as if it had come through the production load balancer.
+
+From your perspective, you just open a normal URL in the browser. kubetunnel sits silently in the background, intercepts that traffic before it leaves your machine, and reroutes it through a `kubectl` tunnel to the real pod — so the URL in the address bar, the TLS cert, and the HTTP headers all match what you would see in production. The sequence diagram below zooms in on what happens step by step.
 
 ### Request walkthrough
 
