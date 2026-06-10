@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 )
 
 const plistLabel = "dev.kubetunnel"
@@ -71,20 +72,46 @@ func installPlist(cfgPath string) error {
 	if err := os.WriteFile(plistPath, []byte(body), 0o644); err != nil {
 		return err
 	}
-	// bootstrap + enable + kickstart.
-	cmds := [][]string{
-		{"launchctl", "bootout", "system/" + plistLabel}, // ignore errors
-		{"launchctl", "bootstrap", "system", plistPath},
-		{"launchctl", "kickstart", "-k", "system/" + plistLabel},
+	// bootout is asynchronous: launchd returns before the service is fully
+	// torn down, and a bootstrap issued during teardown fails with EIO
+	// (exit status 5). Wait for the unload to complete, then retry the
+	// bootstrap a few times to absorb any residual race.
+	_ = exec.Command("launchctl", "bootout", "system/"+plistLabel).Run()
+	waitForBootout()
+	if err := retryLaunchctl(5, "bootstrap", "system", plistPath); err != nil {
+		return err
 	}
-	for i, c := range cmds {
-		cmd := exec.Command(c[0], c[1:]...)
-		out, err := cmd.CombinedOutput()
-		if err != nil && i != 0 {
-			return fmt.Errorf("launchctl %v: %w — %s", c, err, out)
-		}
+	if err := retryLaunchctl(3, "kickstart", "-k", "system/"+plistLabel); err != nil {
+		return err
 	}
 	return nil
+}
+
+// waitForBootout polls until launchd no longer knows the service, i.e. the
+// asynchronous bootout has finished. Gives up after ~5s and lets the
+// bootstrap retries deal with whatever state launchd is in.
+func waitForBootout() {
+	for i := 0; i < 50; i++ {
+		if exec.Command("launchctl", "print", "system/"+plistLabel).Run() != nil {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func retryLaunchctl(attempts int, args ...string) error {
+	var out []byte
+	var err error
+	for i := 0; i < attempts; i++ {
+		if i > 0 {
+			time.Sleep(500 * time.Millisecond)
+		}
+		out, err = exec.Command("launchctl", args...).CombinedOutput()
+		if err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("launchctl %v: %w — %s", args, err, out)
 }
 
 func uninstallPlist() error {
