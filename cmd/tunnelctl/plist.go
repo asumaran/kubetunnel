@@ -76,7 +76,7 @@ func installPlist(cfgPath string) error {
 	// torn down, and a bootstrap issued during teardown fails with EIO
 	// (exit status 5). Wait for the unload to complete, then retry the
 	// bootstrap a few times to absorb any residual race.
-	_ = exec.Command("launchctl", "bootout", "system/"+plistLabel).Run()
+	_, _ = launchctl("bootout", "system/"+plistLabel)
 	waitForBootout()
 	if err := retryLaunchctl(5, "bootstrap", "system", plistPath); err != nil {
 		return err
@@ -87,15 +87,23 @@ func installPlist(cfgPath string) error {
 	return nil
 }
 
+// Injection points so tests can exercise the retry logic without launchd.
+var (
+	launchctl = func(args ...string) ([]byte, error) {
+		return exec.Command("launchctl", args...).CombinedOutput()
+	}
+	launchctlDelay = time.Sleep
+)
+
 // waitForBootout polls until launchd no longer knows the service, i.e. the
 // asynchronous bootout has finished. Gives up after ~5s and lets the
 // bootstrap retries deal with whatever state launchd is in.
 func waitForBootout() {
 	for i := 0; i < 50; i++ {
-		if exec.Command("launchctl", "print", "system/"+plistLabel).Run() != nil {
+		if _, err := launchctl("print", "system/"+plistLabel); err != nil {
 			return
 		}
-		time.Sleep(100 * time.Millisecond)
+		launchctlDelay(100 * time.Millisecond)
 	}
 }
 
@@ -104,9 +112,9 @@ func retryLaunchctl(attempts int, args ...string) error {
 	var err error
 	for i := 0; i < attempts; i++ {
 		if i > 0 {
-			time.Sleep(500 * time.Millisecond)
+			launchctlDelay(500 * time.Millisecond)
 		}
-		out, err = exec.Command("launchctl", args...).CombinedOutput()
+		out, err = launchctl(args...)
 		if err == nil {
 			return nil
 		}
