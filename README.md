@@ -133,7 +133,7 @@ This writes a `visudo`-validated snippet at `/etc/sudoers.d/kubetunnel-dev` that
 ## Commands
 
 ```bash
-tunnelctl status                                     # table of tunnel states
+tunnelctl status                                     # table of tunnel states (+ local port and in-cluster target)
 tunnelctl dashboard                                  # TUI with live logs
 tunnelctl logs --tail 200                            # last 200 entries
 tunnelctl logs -f                                    # live tail (SSE)
@@ -149,9 +149,12 @@ sudo tunnelctl uninstall                             # remove hosts entries + pl
 
 ## TUI keybindings
 
+The dashboard is built from Bubbles components: a `table` for the tunnel list (with an in-cluster `TARGET` column), a `viewport` for the log pane (full scrollback), and `help` for the footer keymap.
+
 | Key | Action |
 |---|---|
-| `↑`/`↓` or `j`/`k` | Navigate tunnels |
+| `↑`/`↓` or `j`/`k` | Navigate tunnels (table focus) or scroll the log pane (logs focus) |
+| `PgUp`/`PgDn` | Scroll the log pane (logs focus) |
 | `tab` | Switch focus between table and logs pane |
 | `r` | Restart selected tunnel |
 | `R` | Reload config |
