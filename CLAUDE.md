@@ -21,6 +21,12 @@ daemon with `launchctl kickstart -k system/dev.kubetunnel` (in-place restart; th
 daemon re-reads config and re-issues certs on boot). This is the canonical update
 path.
 
+Once the sudoers snippet is installed (see below — it already is on this machine),
+`update.sh` runs **end-to-end with no password prompt**, so the AI can run it
+directly and does not need to hand it to the user. The script picks its restart
+branch from the presence of the LaunchDaemon plist (not `sudo launchctl print`),
+so the non-interactive sudo path works reliably.
+
 ### Scenario B — config change that adds or renames a tunnel hostname.
 
 `update.sh` does NOT rewrite `/etc/hosts`. After it, also run:
@@ -32,10 +38,13 @@ sudo tunnelctl install
 This rewrites the `/etc/hosts` block from the current config and issues the cert
 for the new hostname.
 
-## Making it fully automatable (one-time, do this if not done)
+## Making it fully automatable (one-time — already done on this machine)
 
-By default the `sudo` steps prompt for a password, and an AI session has no TTY to
-type it, so the command fails. Install the sudoers snippet ONCE:
+The sudoers snippet is already installed here, so `update.sh` is passwordless and
+the steps below are only needed on a fresh machine.
+
+Without the snippet the `sudo` steps prompt for a password, and an AI session has
+no TTY to type it, so the command fails. Install the sudoers snippet ONCE:
 
 ```
 ./scripts/install-sudoers.sh
