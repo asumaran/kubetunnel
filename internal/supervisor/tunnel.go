@@ -411,16 +411,20 @@ func (t *tunnelRunner) Status() Status {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	s := Status{
-		Name:       t.cfg.Name,
-		Hostname:   t.cfg.Hostname,
-		LocalPort:  t.cfg.LocalPort,
-		State:      t.state,
-		PID:        t.pid,
-		StartedAt:  t.startedAt,
-		Restarts:   t.restarts,
-		LastError:  t.lastError,
-		HealthOK:   t.healthOK,
-		LastHealth: t.lastHealth,
+		Name:        t.cfg.Name,
+		Hostname:    t.cfg.Hostname,
+		LocalPort:   t.cfg.LocalPort,
+		KubeContext: t.cfg.KubeContext,
+		Namespace:   t.cfg.Namespace,
+		Target:      t.cfg.Target,
+		RemotePort:  t.cfg.RemotePort,
+		State:       t.state,
+		PID:         t.pid,
+		StartedAt:   t.startedAt,
+		Restarts:    t.restarts,
+		LastError:   t.lastError,
+		HealthOK:    t.healthOK,
+		LastHealth:  t.lastHealth,
 	}
 	if !t.startedAt.IsZero() && t.state == StateRunning {
 		s.Uptime = time.Since(t.startedAt).Round(time.Second).String()

@@ -68,7 +68,7 @@ func statusCmd() *cobra.Command {
 				return fmt.Errorf("daemon unreachable: %w", err)
 			}
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "NAME\tSTATE\tUPTIME\tRESTARTS\tHEALTH\tHOSTNAME\tLOCAL")
+			fmt.Fprintln(w, "NAME\tSTATE\tUPTIME\tRESTARTS\tHEALTH\tHOSTNAME\tLOCAL\tTARGET")
 			for _, t := range resp.Tunnels {
 				health := "OK"
 				if !t.HealthOK {
@@ -78,8 +78,8 @@ func statusCmd() *cobra.Command {
 				if uptime == "" {
 					uptime = "—"
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\t%s\t:%d\n",
-					t.Name, t.State, uptime, t.Restarts, health, t.Hostname, t.LocalPort)
+				fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\t%s\t:%d\t%s\n",
+					t.Name, t.State, uptime, t.Restarts, health, t.Hostname, t.LocalPort, t.InternalTarget())
 			}
 			return w.Flush()
 		},

@@ -334,16 +334,17 @@ func (m *model) View() string {
 
 func (m *model) renderTable(w, h int) string {
 	var sb strings.Builder
-	sb.WriteString(headerRow.Render(fmt.Sprintf("%-20s %-10s %-10s %-8s %-6s %s", "NAME", "STATE", "UPTIME", "RESTARTS", "HEALTH", "HOSTNAME")))
+	sb.WriteString(headerRow.Render(fmt.Sprintf("%-20s %-10s %-10s %-8s %-6s %-42s %s", "NAME", "STATE", "UPTIME", "RESTARTS", "HEALTH", "HOSTNAME", "TARGET")))
 	sb.WriteString("\n")
 	for i, t := range m.tunnels {
-		line := fmt.Sprintf("%-20s %-10s %-10s %-8d %-6s %s",
+		line := fmt.Sprintf("%-20s %-10s %-10s %-8d %-6s %-42s %s",
 			trunc(t.Name, 20),
 			t.State,
 			orDash(t.Uptime),
 			t.Restarts,
 			healthText(t.HealthOK),
-			t.Hostname,
+			trunc(t.Hostname, 42),
+			t.InternalTarget(),
 		)
 		st := stateStyle(string(t.State))
 		rendered := st.Render(line)
@@ -363,13 +364,17 @@ func (m *model) renderTable(w, h int) string {
 }
 
 func (m *model) renderLogs(w, h int) string {
-	var selName string
+	var selName, selTarget string
 	if len(m.tunnels) > 0 {
 		selName = m.tunnels[m.selected].Name
+		selTarget = m.tunnels[m.selected].InternalTarget()
 	}
 	title := "logs"
 	if selName != "" {
 		title = "logs: " + selName
+		if selTarget != "" {
+			title += "  →  " + selTarget
+		}
 	}
 	var sb strings.Builder
 	sb.WriteString(dim.Render(title))
