@@ -334,7 +334,9 @@ func (m *model) View() string {
 
 func (m *model) renderTable(w, h int) string {
 	var sb strings.Builder
-	sb.WriteString(headerRow.Render(fmt.Sprintf("%-20s %-10s %-10s %-8s %-6s %-42s %s", "NAME", "STATE", "UPTIME", "RESTARTS", "HEALTH", "HOSTNAME", "TARGET")))
+	// Data rows are prefixed with a 2-char selection marker ("▶ " or "  "), so
+	// indent the header by the same width to keep the columns aligned.
+	sb.WriteString(headerRow.Render("  " + fmt.Sprintf("%-20s %-10s %-10s %-8s %-6s %-42s %s", "NAME", "STATE", "UPTIME", "RESTARTS", "HEALTH", "HOSTNAME", "TARGET")))
 	sb.WriteString("\n")
 	for i, t := range m.tunnels {
 		line := fmt.Sprintf("%-20s %-10s %-10s %-8d %-6s %-42s %s",
