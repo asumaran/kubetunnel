@@ -117,7 +117,7 @@ cd ~/kubetunnel
 
 The script:
 1. Verifies `go`, `mkcert`, and `kubectl` are on `PATH`.
-2. Builds `kubetunneld` + `tunnelctl` and installs them under `/usr/local/bin` (one `sudo`).
+2. Builds `kubetunneld` + `tunnelctl` and installs them under `/usr/local/bin` (via `sudo`; a second `sudo` comes in step 5).
 3. Copies `config.example.yaml` → `~/.config/kubetunnel/config.yaml` if you don't have one yet.
 4. Runs `mkcert -install` to add its root CA to your system keychain, then issues a cert for every hostname in the config.
 5. Writes the delimited `/etc/hosts` block and installs the LaunchDaemon at `/Library/LaunchDaemons/dev.kubetunnel.plist`.
@@ -188,6 +188,7 @@ See [`config.example.yaml`](./config.example.yaml). Paths support `~` expansion.
 
 Each tunnel needs at minimum `name`, `hostname`, `kube_context`, `namespace`, `target`, and `local_port`. Optional fields:
 
+- `strip_prefix` — a leading path prefix removed from every request before it is forwarded to the backend. Use it to replay an Istio `VirtualService` rewrite that `kubectl port-forward` bypasses, e.g. `strip_prefix: /cms-shield` turns `/cms-shield/foo` into `/foo` so the canonical public URL keeps working end-to-end.
 - `health_check` — `path`, `interval`, `timeout`, `fail_threshold`. Leave it out entirely if the target has no cheap health endpoint; the supervisor will still detect kubectl crashes without it.
 - `headers` — extra headers to inject into every request going through the proxy for that tunnel.
 - `environment.path_additions` / `environment.extra` — globally prepended to `PATH` and merged into the env of every `kubectl` subprocess. Important when the daemon runs under launchd with a minimal `PATH` and cannot find auth plugins like `gke-gcloud-auth-plugin` under `/usr/local/share/google-cloud-sdk/bin`.
@@ -202,6 +203,31 @@ All logs are JSON lines, rotated by [`lumberjack`](https://github.com/natefinch/
 - `~/Library/Logs/kubetunnel/daemon.out.log` / `daemon.err.log` — launchd's own capture of the process (fallback in case the daemon dies before its logger is up).
 
 Live tailing via `tunnelctl logs -f` does **not** poll files — it subscribes to an in-memory ring buffer over the control socket (SSE), so there's effectively no lag and no extra disk I/O.
+
+## Checking the installed version (git commit)
+
+There is no semantic version: the binaries carry no `--version` flag. But `go build` embeds the source's VCS info, so the commit each installed binary was built from is recoverable with `go version -m`. Check each binary on its own:
+
+```bash
+# Daemon
+go version -m /usr/local/bin/kubetunneld | grep vcs
+
+# CLI
+go version -m /usr/local/bin/tunnelctl | grep vcs
+```
+
+Each prints `vcs.revision` (the commit), `vcs.time` (its date), and `vcs.modified`. To compare both binaries and the repo at a glance:
+
+```bash
+for b in kubetunneld tunnelctl; do
+  rev=$(go version -m /usr/local/bin/$b | sed -n 's/.*vcs.revision=//p')
+  mod=$(go version -m /usr/local/bin/$b | sed -n 's/.*vcs.modified=//p')
+  echo "$b: ${rev:0:7} (modified=$mod)"
+done
+git rev-parse --short HEAD   # the working tree, for comparison
+```
+
+`vcs.modified=true` means the binary was built from a tree with uncommitted changes (a "dirty" build). `kubetunneld` (the daemon) and `tunnelctl` (the CLI) are built together by `scripts/update.sh`, so they should always report the same commit; if they diverge, one was installed on its own — re-run `./scripts/update.sh` to realign them.
 
 ## Troubleshooting
 
