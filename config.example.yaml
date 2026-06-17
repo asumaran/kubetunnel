@@ -43,6 +43,10 @@ tunnels:
     # No health_check: a generic probe would hit an endpoint the app does not
     # implement and get killed in a loop. Add one only when the target has a
     # dedicated /healthz route.
+    #
+    # Optional: strip a leading path prefix before forwarding, to replay an
+    # Istio VirtualService rewrite that `kubectl port-forward` bypasses.
+    # strip_prefix: /api
 
   - name: web-a
     hostname: web-a.staging.internal.example.com
