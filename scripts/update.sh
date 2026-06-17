@@ -21,13 +21,24 @@ sudo -n install -m 0755 ./bin/tunnelctl /usr/local/bin/tunnelctl 2>/dev/null \
   || sudo install -m 0755 ./bin/tunnelctl /usr/local/bin/tunnelctl
 
 echo "[3/3] Restarting daemon..."
-if sudo launchctl print system/dev.kubetunnel >/dev/null 2>&1; then
-  sudo -n launchctl kickstart -k system/dev.kubetunnel 2>/dev/null \
-    || sudo launchctl kickstart -k system/dev.kubetunnel
+
+# Try passwordless sudo first (relies on the sudoers snippet from
+# scripts/install-sudoers.sh); fall back to an interactive sudo otherwise.
+run_sudo() { sudo -n "$@" 2>/dev/null || sudo "$@"; }
+
+# Decide between "restart in place" and "first install" by the presence of the
+# LaunchDaemon plist, not by `sudo launchctl print` — that command is not in the
+# sudoers whitelist, so under a non-interactive sudo it fails and would send us
+# down the wrong branch (tunnelctl install, which also is not whitelisted).
+PLIST=/Library/LaunchDaemons/dev.kubetunnel.plist
+if [ -f "$PLIST" ]; then
+  # Already installed: kickstart -k re-execs the daemon onto the freshly built
+  # binary. If the service is not currently loaded kickstart fails, so bootstrap.
+  run_sudo launchctl kickstart -k system/dev.kubetunnel \
+    || run_sudo launchctl bootstrap system "$PLIST"
 else
-  echo "    daemon not bootstrapped yet — running 'tunnelctl install'..."
-  sudo -n /usr/local/bin/tunnelctl install 2>/dev/null \
-    || sudo /usr/local/bin/tunnelctl install
+  echo "    daemon not installed yet — running 'tunnelctl install'..."
+  run_sudo /usr/local/bin/tunnelctl install
 fi
 
 # Wait for the daemon's control socket to come back before returning so the
