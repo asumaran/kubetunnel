@@ -1,6 +1,6 @@
 // Package proxy implements the local HTTPS reverse proxy that terminates TLS
 // using mkcert-issued certs and routes to the appropriate kubectl port-forward
-// by Host header.
+// by Host header and, when several tunnels share a hostname, by path prefix.
 package proxy
 
 import (
@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,11 +26,25 @@ type ReadinessChecker interface {
 	IsReady(name string) bool
 }
 
-// Backend ties a hostname to a tunnel.
+// Backend ties a hostname (and optional path prefix) to a tunnel.
 type backend struct {
 	tunnelName string
 	hostname   string
+	pathPrefix string
 	proxy      *httputil.ReverseProxy
+}
+
+// matches reports whether the backend's path prefix applies to path. An empty
+// prefix is the catch-all. Prefixes match on segment boundaries only.
+func (b *backend) matches(path string) bool {
+	if b.pathPrefix == "" {
+		return true
+	}
+	if !strings.HasPrefix(path, b.pathPrefix) {
+		return false
+	}
+	rest := path[len(b.pathPrefix):]
+	return rest == "" || rest[0] == '/'
 }
 
 // Server is the HTTPS reverse proxy. It is safe to Update() the backend map at
@@ -41,7 +56,7 @@ type Server struct {
 	listener string
 
 	mu       sync.RWMutex
-	backends map[string]*backend // keyed by lowercase hostname
+	backends map[string][]*backend // keyed by lowercase hostname, longest prefix first
 }
 
 func New(listenAddr string, logger *logging.Logger, ready ReadinessChecker, loader *certs.Loader) *Server {
@@ -49,7 +64,7 @@ func New(listenAddr string, logger *logging.Logger, ready ReadinessChecker, load
 		logger:   logger,
 		ready:    ready,
 		listener: listenAddr,
-		backends: make(map[string]*backend),
+		backends: make(map[string][]*backend),
 	}
 	tlsCfg := &tls.Config{
 		GetCertificate: loader.GetCertificate,
@@ -68,7 +83,7 @@ func New(listenAddr string, logger *logging.Logger, ready ReadinessChecker, load
 
 // Update rebuilds the backend routing map from the given tunnels.
 func (s *Server) Update(tunnels []config.Tunnel) error {
-	nb := make(map[string]*backend, len(tunnels))
+	nb := make(map[string][]*backend, len(tunnels))
 	for _, t := range tunnels {
 		targetURL, err := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", t.LocalPort))
 		if err != nil {
@@ -77,6 +92,7 @@ func (s *Server) Update(tunnels []config.Tunnel) error {
 		b := &backend{
 			tunnelName: t.Name,
 			hostname:   t.Hostname,
+			pathPrefix: t.PathPrefix,
 		}
 		p := &httputil.ReverseProxy{
 			Director: s.director(t, targetURL),
@@ -93,7 +109,15 @@ func (s *Server) Update(tunnels []config.Tunnel) error {
 			},
 		}
 		b.proxy = p
-		nb[toKey(t.Hostname)] = b
+		key := toKey(t.Hostname)
+		nb[key] = append(nb[key], b)
+	}
+	// Longest prefix first so the most specific tunnel wins; the catch-all
+	// (empty prefix) naturally sorts last.
+	for _, list := range nb {
+		sort.SliceStable(list, func(i, j int) bool {
+			return len(list[i].pathPrefix) > len(list[j].pathPrefix)
+		})
 	}
 	s.mu.Lock()
 	s.backends = nb
@@ -143,7 +167,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	host := toKey(stripPort(r.Host))
 	s.mu.RLock()
-	b, ok := s.backends[host]
+	candidates, ok := s.backends[host]
 	s.mu.RUnlock()
 	if !ok {
 		http.Error(w, fmt.Sprintf("unknown host %q", r.Host), http.StatusNotFound)
@@ -153,6 +177,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"path":        r.URL.Path,
 			"status":      404,
 			"duration_ms": time.Since(start).Milliseconds(),
+		})
+		return
+	}
+	b := pickBackend(candidates, r.URL.Path)
+	if b == nil {
+		http.Error(w, fmt.Sprintf("no tunnel for %s%s", r.Host, r.URL.Path), http.StatusNotFound)
+		s.logger.Access("", map[string]any{
+			"method":      r.Method,
+			"host":        r.Host,
+			"path":        r.URL.Path,
+			"status":      404,
+			"duration_ms": time.Since(start).Milliseconds(),
+			"reason":      "no_matching_path_prefix",
 		})
 		return
 	}
@@ -227,6 +264,17 @@ func writeUnavailable(w http.ResponseWriter, tunnel string) {
 <h1>503 Service Unavailable</h1>
 <p>Tunnel <b>%s</b> is reconnecting. Retry in a few seconds.</p>
 </body></html>`, tunnel)
+}
+
+// pickBackend returns the first backend whose prefix matches path. The list
+// is sorted longest prefix first by Update, so the most specific wins.
+func pickBackend(list []*backend, path string) *backend {
+	for _, b := range list {
+		if b.matches(path) {
+			return b
+		}
+	}
+	return nil
 }
 
 func toKey(s string) string {

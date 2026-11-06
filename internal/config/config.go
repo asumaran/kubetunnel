@@ -49,18 +49,25 @@ type AccessLogConfig struct {
 }
 
 type Tunnel struct {
-	Name        string            `yaml:"name"`
-	Hostname    string            `yaml:"hostname"`
-	KubeContext string            `yaml:"kube_context"`
-	Namespace   string            `yaml:"namespace"`
-	Target      string            `yaml:"target"`
-	RemotePort  int               `yaml:"remote_port"`
-	LocalPort   int               `yaml:"local_port"`
+	Name        string `yaml:"name"`
+	Hostname    string `yaml:"hostname"`
+	KubeContext string `yaml:"kube_context"`
+	Namespace   string `yaml:"namespace"`
+	Target      string `yaml:"target"`
+	RemotePort  int    `yaml:"remote_port"`
+	LocalPort   int    `yaml:"local_port"`
 	// StripPrefix is removed from the request path before forwarding. Use this
 	// when an upstream proxy (e.g. Istio VirtualService) rewrites the URI
 	// before requests reach the pod — kubetunnel replays the same rewrite so
 	// clients can keep using the canonical public URL.
-	StripPrefix string            `yaml:"strip_prefix,omitempty"`
+	StripPrefix string `yaml:"strip_prefix,omitempty"`
+	// PathPrefix restricts this tunnel to requests whose path starts with the
+	// prefix (matched on segment boundaries, so "/api" matches "/api" and
+	// "/api/x" but not "/apix"). Several tunnels may share a hostname as long
+	// as their prefixes differ; the longest matching prefix wins and a tunnel
+	// without prefix acts as the catch-all for that hostname. Use it to
+	// replay an ingress that fans one host out to many services by path.
+	PathPrefix  string            `yaml:"path_prefix,omitempty"`
 	HealthCheck *HealthCheck      `yaml:"health_check,omitempty"`
 	Headers     map[string]string `yaml:"headers,omitempty"`
 }
@@ -134,6 +141,9 @@ func (c *Config) applyDefaults() error {
 		if t.RemotePort == 0 {
 			t.RemotePort = 80
 		}
+		if t.PathPrefix != "" && t.PathPrefix != "/" {
+			t.PathPrefix = strings.TrimRight(t.PathPrefix, "/")
+		}
 		if t.HealthCheck != nil {
 			if t.HealthCheck.Interval == 0 {
 				t.HealthCheck.Interval = 30 * time.Second
@@ -154,7 +164,7 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("no tunnels defined")
 	}
 	names := map[string]bool{}
-	hostnames := map[string]bool{}
+	routes := map[string]string{} // hostname + path_prefix -> tunnel name
 	localPorts := map[int]string{}
 	for i, t := range c.Tunnels {
 		prefix := fmt.Sprintf("tunnels[%d] (%q)", i, t.Name)
@@ -169,10 +179,17 @@ func (c *Config) Validate() error {
 		if t.Hostname == "" {
 			return fmt.Errorf("%s: hostname required", prefix)
 		}
-		if hostnames[t.Hostname] {
-			return fmt.Errorf("%s: duplicate hostname %q", prefix, t.Hostname)
+		if t.PathPrefix != "" && !strings.HasPrefix(t.PathPrefix, "/") {
+			return fmt.Errorf("%s: path_prefix must start with \"/\"", prefix)
 		}
-		hostnames[t.Hostname] = true
+		routeKey := strings.ToLower(t.Hostname) + "\x00" + t.PathPrefix
+		if existing, ok := routes[routeKey]; ok {
+			if t.PathPrefix == "" {
+				return fmt.Errorf("%s: duplicate hostname %q (already used by %q; add a path_prefix to share a hostname)", prefix, t.Hostname, existing)
+			}
+			return fmt.Errorf("%s: duplicate path_prefix %q for hostname %q (already used by %q)", prefix, t.PathPrefix, t.Hostname, existing)
+		}
+		routes[routeKey] = t.Name
 
 		if t.KubeContext == "" {
 			return fmt.Errorf("%s: kube_context required", prefix)
@@ -197,13 +214,26 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// HostnameList returns the list of hostnames for /etc/hosts management.
+// HostnameList returns the distinct hostnames, in config order, for
+// /etc/hosts and certificate management. Tunnels that share a hostname
+// (path-based routing) contribute it once.
 func (c *Config) HostnameList() []string {
 	out := make([]string, 0, len(c.Tunnels))
+	seen := map[string]bool{}
 	for _, t := range c.Tunnels {
+		if seen[t.Hostname] {
+			continue
+		}
+		seen[t.Hostname] = true
 		out = append(out, t.Hostname)
 	}
 	return out
+}
+
+// Route is the client-facing address a tunnel answers on: the hostname plus
+// its path_prefix, e.g. "eshop.dev.example.com/contentful".
+func (t Tunnel) Route() string {
+	return t.Hostname + t.PathPrefix
 }
 
 // FindTunnel returns the tunnel with the given name, or nil.

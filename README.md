@@ -191,6 +191,7 @@ See [`config.example.yaml`](./config.example.yaml). Paths support `~` expansion.
 
 Each tunnel needs at minimum `name`, `hostname`, `kube_context`, `namespace`, `target`, and `local_port`. Optional fields:
 
+- `path_prefix` — restricts the tunnel to requests whose path starts with the prefix (segment-aware: `/stores` matches `/stores` and `/stores/x`, not `/storesx`). Several tunnels may share one `hostname` as long as their prefixes differ; the longest matching prefix wins, and a tunnel without `path_prefix` is the catch-all for that hostname. Use it to replay an ingress that fans a single host out to many services by path (e.g. Istio routing `/contentful` and `/stores` on the same gateway host to different services). Requests that match no prefix and have no catch-all get a `404`. Combine with `strip_prefix` when the ingress also rewrites the path.
 - `strip_prefix` — a leading path prefix removed from every request before it is forwarded to the backend. Use it to replay an Istio `VirtualService` rewrite that `kubectl port-forward` bypasses, e.g. `strip_prefix: /cms-shield` turns `/cms-shield/foo` into `/foo` so the canonical public URL keeps working end-to-end.
 - `health_check` — `path`, `interval`, `timeout`, `fail_threshold`. Leave it out entirely if the target has no cheap health endpoint; the supervisor will still detect kubectl crashes without it.
 - `headers` — extra headers to inject into every request going through the proxy for that tunnel.

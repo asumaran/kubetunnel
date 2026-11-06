@@ -133,3 +133,83 @@ func TestExpandPath(t *testing.T) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
+
+const sharedHostYAML = `
+tunnels:
+  - name: contentful
+    hostname: eshop.example.com
+    kube_context: gke_foo
+    namespace: eshop
+    target: svc/contentful-api
+    local_port: 9101
+    path_prefix: /contentful/
+    strip_prefix: /contentful
+  - name: stores
+    hostname: eshop.example.com
+    kube_context: gke_foo
+    namespace: eshop
+    target: svc/stores
+    local_port: 9102
+    path_prefix: /stores
+    strip_prefix: /stores
+  - name: fallback
+    hostname: eshop.example.com
+    kube_context: gke_foo
+    namespace: eshop
+    target: svc/gateway
+    local_port: 9103
+  - name: other
+    hostname: other.example.com
+    kube_context: gke_foo
+    namespace: eshop
+    target: svc/other
+    local_port: 9104
+`
+
+func TestSharedHostnameWithPathPrefixes(t *testing.T) {
+	p := writeTempConfig(t, sharedHostYAML)
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := cfg.Tunnels[0].PathPrefix; got != "/contentful" {
+		t.Errorf("expected trailing slash trimmed, got %q", got)
+	}
+	if got := cfg.Tunnels[0].Route(); got != "eshop.example.com/contentful" {
+		t.Errorf("unexpected route %q", got)
+	}
+	if got := cfg.Tunnels[2].Route(); got != "eshop.example.com" {
+		t.Errorf("unexpected catch-all route %q", got)
+	}
+	hosts := cfg.HostnameList()
+	if len(hosts) != 2 || hosts[0] != "eshop.example.com" || hosts[1] != "other.example.com" {
+		t.Errorf("expected distinct hostnames in config order, got %v", hosts)
+	}
+}
+
+func TestValidateDuplicatePathPrefix(t *testing.T) {
+	y := strings.ReplaceAll(sharedHostYAML, "path_prefix: /stores", "path_prefix: /contentful")
+	p := writeTempConfig(t, y)
+	_, err := Load(p)
+	if err == nil || !strings.Contains(err.Error(), `duplicate path_prefix "/contentful"`) {
+		t.Fatalf("expected duplicate path_prefix error, got: %v", err)
+	}
+}
+
+func TestValidateDuplicateCatchAll(t *testing.T) {
+	y := strings.ReplaceAll(sharedHostYAML, "    path_prefix: /stores\n", "")
+	p := writeTempConfig(t, y)
+	_, err := Load(p)
+	if err == nil || !strings.Contains(err.Error(), "duplicate hostname") {
+		t.Fatalf("expected duplicate hostname error, got: %v", err)
+	}
+}
+
+func TestValidatePathPrefixMustStartWithSlash(t *testing.T) {
+	y := strings.ReplaceAll(sharedHostYAML, "path_prefix: /stores", "path_prefix: stores")
+	p := writeTempConfig(t, y)
+	_, err := Load(p)
+	if err == nil || !strings.Contains(err.Error(), "path_prefix must start with") {
+		t.Fatalf("expected path_prefix format error, got: %v", err)
+	}
+}

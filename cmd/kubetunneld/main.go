@@ -84,16 +84,17 @@ func main() {
 	logger.Daemon("info", "", "startup", "kubetunneld starting",
 		map[string]any{"config": *configPath, "tunnels": len(cfg.Tunnels)})
 
-	// Certs: load or generate one per tunnel hostname.
+	// Certs: load or generate one per distinct hostname (tunnels that share a
+	// hostname via path_prefix share its certificate).
 	loader := certs.NewLoader()
-	for _, t := range cfg.Tunnels {
-		certPath, keyPath, err := certs.EnsureCert(cfg.TLS.CertDir, t.Hostname)
+	for _, hostname := range cfg.HostnameList() {
+		certPath, keyPath, err := certs.EnsureCert(cfg.TLS.CertDir, hostname)
 		if err != nil {
-			logger.Daemon("error", t.Name, "cert_error", err.Error(), nil)
+			logger.Daemon("error", hostname, "cert_error", err.Error(), nil)
 			continue
 		}
-		if err := loader.Add(t.Hostname, certPath, keyPath); err != nil {
-			logger.Daemon("error", t.Name, "cert_load_error", err.Error(), nil)
+		if err := loader.Add(hostname, certPath, keyPath); err != nil {
+			logger.Daemon("error", hostname, "cert_load_error", err.Error(), nil)
 		}
 	}
 

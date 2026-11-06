@@ -413,6 +413,7 @@ func (t *tunnelRunner) Status() Status {
 	s := Status{
 		Name:        t.cfg.Name,
 		Hostname:    t.cfg.Hostname,
+		PathPrefix:  t.cfg.PathPrefix,
 		LocalPort:   t.cfg.LocalPort,
 		KubeContext: t.cfg.KubeContext,
 		Namespace:   t.cfg.Namespace,

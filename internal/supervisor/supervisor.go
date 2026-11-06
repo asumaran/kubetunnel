@@ -155,7 +155,7 @@ func (s *Supervisor) IsReady(name string) bool {
 }
 
 func tunnelEqual(a, b config.Tunnel) bool {
-	if a.Name != b.Name || a.Hostname != b.Hostname ||
+	if a.Name != b.Name || a.Hostname != b.Hostname || a.PathPrefix != b.PathPrefix ||
 		a.KubeContext != b.KubeContext || a.Namespace != b.Namespace ||
 		a.Target != b.Target || a.RemotePort != b.RemotePort ||
 		a.LocalPort != b.LocalPort {

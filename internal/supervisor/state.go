@@ -20,6 +20,7 @@ const (
 type Status struct {
 	Name        string    `json:"name"`
 	Hostname    string    `json:"hostname"`
+	PathPrefix  string    `json:"path_prefix,omitempty"`
 	LocalPort   int       `json:"local_port"`
 	KubeContext string    `json:"kube_context,omitempty"`
 	Namespace   string    `json:"namespace,omitempty"`
@@ -42,4 +43,10 @@ func (s Status) InternalTarget() string {
 		return ""
 	}
 	return fmt.Sprintf("%s/%s:%d", s.Namespace, s.Target, s.RemotePort)
+}
+
+// Route is the client-facing address the tunnel answers on: hostname plus
+// path prefix, e.g. "eshop.dev.example.com/contentful".
+func (s Status) Route() string {
+	return s.Hostname + s.PathPrefix
 }

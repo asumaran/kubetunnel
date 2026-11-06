@@ -79,7 +79,7 @@ func statusCmd() *cobra.Command {
 					uptime = "—"
 				}
 				fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\t%s\t:%d\t%s\n",
-					t.Name, t.State, uptime, t.Restarts, health, t.Hostname, t.LocalPort, t.InternalTarget())
+					t.Name, t.State, uptime, t.Restarts, health, t.Route(), t.LocalPort, t.InternalTarget())
 			}
 			return w.Flush()
 		},
@@ -206,13 +206,13 @@ func certInstallCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			for _, t := range cfg.Tunnels {
-				certPath, keyPath, err := certs.EnsureCert(cfg.TLS.CertDir, t.Hostname)
+			for _, hostname := range cfg.HostnameList() {
+				certPath, keyPath, err := certs.EnsureCert(cfg.TLS.CertDir, hostname)
 				if err != nil {
-					fmt.Printf("! %s: %v\n", t.Hostname, err)
+					fmt.Printf("! %s: %v\n", hostname, err)
 					continue
 				}
-				fmt.Printf("✓ %s\n  cert: %s\n  key:  %s\n", t.Hostname, certPath, keyPath)
+				fmt.Printf("✓ %s\n  cert: %s\n  key:  %s\n", hostname, certPath, keyPath)
 			}
 			return nil
 		},

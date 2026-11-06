@@ -69,3 +69,28 @@ tunnels:
     health_check:
       path: /api/health
       interval: 30s
+
+  # One public host, many services: an Istio VirtualService per path prefix
+  # fans "gateway.staging.internal.example.com" out to several backends.
+  # kubetunnel replays that with one tunnel per prefix on the same hostname;
+  # the longest matching prefix wins. A tunnel without path_prefix would be
+  # the catch-all for the host. Each entry keeps its own kubectl port-forward,
+  # so only the services you actually consume need to be listed.
+  # - name: gateway-contentful
+  #   hostname: gateway.staging.internal.example.com
+  #   kube_context: gke_my-project_europe-west1_staging
+  #   namespace: staging
+  #   target: svc/contentful-api
+  #   remote_port: 80
+  #   local_port: 9101
+  #   path_prefix: /contentful
+  #   strip_prefix: /contentful   # replay the VirtualService rewrite to "/"
+  # - name: gateway-stores
+  #   hostname: gateway.staging.internal.example.com
+  #   kube_context: gke_my-project_europe-west1_staging
+  #   namespace: staging
+  #   target: svc/stores
+  #   remote_port: 80
+  #   local_port: 9102
+  #   path_prefix: /stores
+  #   strip_prefix: /stores

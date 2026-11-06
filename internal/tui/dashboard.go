@@ -654,7 +654,7 @@ func rows(tunnels []supervisor.Status) []table.Row {
 			orDash(t.Uptime),
 			fmt.Sprintf("%d", t.Restarts),
 			healthText(t.HealthOK),
-			t.Hostname,
+			t.Route(),
 			t.InternalTarget(),
 		})
 	}
