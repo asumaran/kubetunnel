@@ -1,7 +1,8 @@
-# CLAUDE.md — operating instructions for kubetunnel
+# CLAUDE.md: kubetunnel
 
-Guidance for an AI assistant working in this repo. Read this before installing,
-updating, or restarting kubetunnel.
+Operating the tool (install, add a tunnel, diagnose, update) is documented in
+[`AGENTS.md`](./AGENTS.md). Read that first; it applies to any agent. This
+file only adds notes for working on kubetunnel's own code.
 
 ## When the user asks to "update" / "install" / "reinstall" kubetunnel
 
@@ -10,7 +11,7 @@ command. Verify with `tunnelctl status` afterward.
 
 ### Scenario A — code changed (no new/renamed tunnel hostname). The common case.
 
-Run, from the repo root:
+From the repo root:
 
 ```
 ./scripts/update.sh
@@ -21,11 +22,10 @@ daemon with `launchctl kickstart -k system/dev.kubetunnel` (in-place restart; th
 daemon re-reads config and re-issues certs on boot). This is the canonical update
 path.
 
-Once the sudoers snippet is installed (see below — it already is on this machine),
-`update.sh` runs **end-to-end with no password prompt**, so the AI can run it
-directly and does not need to hand it to the user. The script picks its restart
-branch from the presence of the LaunchDaemon plist (not `sudo launchctl print`),
-so the non-interactive sudo path works reliably.
+With the sudoers snippet installed (see below), `update.sh` runs end-to-end with
+no password prompt, so an agent can run it directly. The script picks its
+restart branch from the presence of the LaunchDaemon plist (not
+`sudo launchctl print`), so the non-interactive sudo path works reliably.
 
 ### Scenario B — config change that adds or renames a tunnel hostname.
 
@@ -38,25 +38,25 @@ sudo tunnelctl install
 This rewrites the `/etc/hosts` block from the current config and issues the cert
 for the new hostname.
 
-## Making it fully automatable (one-time — already done on this machine)
+## Making it fully automatable (one-time per machine)
 
-The sudoers snippet is already installed here, so `update.sh` is passwordless and
-the steps below are only needed on a fresh machine.
+Check whether the sudoers snippet is already installed:
 
-Without the snippet the `sudo` steps prompt for a password, and an AI session has
-no TTY to type it, so the command fails. Install the sudoers snippet ONCE:
+```
+ls /etc/sudoers.d/kubetunnel-dev
+```
+
+Without it the `sudo` steps prompt for a password, and an agent session has no
+TTY to type it, so the command fails. Install the snippet ONCE:
 
 ```
 ./scripts/install-sudoers.sh
 ```
 
-It writes a `visudo`-validated `/etc/sudoers.d/kubetunnel-dev` whitelisting exactly
-the commands `update.sh` needs (the two binary `install`s plus
+It writes a `visudo`-validated `/etc/sudoers.d/kubetunnel-dev` whitelisting
+exactly the commands `update.sh` needs (the two binary `install`s plus
 `launchctl kickstart/bootout/bootstrap` for `system/dev.kubetunnel`). After this,
-`./scripts/update.sh` runs end-to-end with no password, so the AI can run it
-directly with no human in the loop.
-
-Check whether it is already installed: `ls /etc/sudoers.d/kubetunnel-dev`.
+`./scripts/update.sh` runs end-to-end with no password.
 
 ## If you are blocked by sudo (no sudoers snippet, no TTY)
 
@@ -87,14 +87,13 @@ only after the installed binary has the retry fix.
 ## Knowing the installed "version" (git commit)
 
 There is no explicit version (no `--version` flag, no `version` subcommand, no
-ldflags). But Go embeds VCS info at build time, so the installed commit is
-recoverable. The two binaries — `kubetunneld` (daemon) and `tunnelctl` (CLI
-client, talks to the daemon over `/var/run/kubetunnel.sock`) — are built together
-by `update.sh` from the same module, so they should always share a commit; nothing
-enforces it, and they can drift if installed separately (that is what broke things
-once: new daemon, old `tunnelctl`).
-
-Read each binary's commit:
+ldflags). Go embeds VCS info at build time, so the installed commit is
+recoverable when the binary was built from a clean checkout. The two binaries —
+`kubetunneld` (daemon) and `tunnelctl` (CLI client, talks to the daemon over
+`/var/run/kubetunnel.sock`) — are built together by `update.sh` from the same
+module, so they should always share a commit; nothing enforces it, and they can
+drift if installed separately (that is what broke things once: new daemon, old
+`tunnelctl`).
 
 ```
 go version -m /usr/local/bin/kubetunneld | awk '/vcs.revision/{print $2}'
@@ -102,16 +101,19 @@ go version -m /usr/local/bin/tunnelctl   | awk '/vcs.revision/{print $2}'
 ```
 
 Also useful from `go version -m`: `vcs.time` (commit date) and `vcs.modified`
-(`true` means a dirty build with uncommitted changes). Compare both binaries and
-the working tree (`git rev-parse HEAD`) to confirm everything is in sync.
+(`true` means a dirty build with uncommitted changes). No `vcs.*` lines at all
+means the binary was built from a worktree with uncommitted changes or with
+`-buildvcs=false`. Compare both binaries and the working tree
+(`git rev-parse HEAD`) to confirm everything is in sync.
 
-## Verify after any of the above
+## Before merging code
 
 ```
-tunnelctl status
+go build ./... && go vet ./... && go test ./...
 ```
 
-All tunnels should be `Running` / `OK`. If a tunnel is `FAIL`/`Starting` in a loop,
-read its logs: `tunnelctl logs --tail 200 | grep <tunnel-name>`. A common cause is
-missing `pods/portforward` RBAC/IAM permission in the target namespace — check with
-`kubectl auth can-i create pods/portforward -n <namespace>`.
+Then `./scripts/update.sh` on the maintainer's machine and `tunnelctl status`:
+every tunnel `Running` / `OK`. If a tunnel is `FAIL`/`Starting` in a loop, read
+its logs: `tunnelctl logs --tail 200 --filter 'tunnel:<name>'`. A common cause is
+missing `pods/portforward` RBAC/IAM permission in the target namespace — check
+with `kubectl auth can-i create pods/portforward -n <namespace>`.

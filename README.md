@@ -107,11 +107,20 @@ sequenceDiagram
 
 The guiding principle: **the daemon never dies because of a bad tunnel**. Every runner has its own goroutine with a `recover()`, every error is logged and bucketed to the offending tunnel, and the proxy keeps serving `503` for dead backends while the healthy ones remain untouched.
 
+## Prerequisites
+
+kubetunnel wraps the `kubectl` access you already have. Before installing, make sure that on this machine:
+
+- `go`, `mkcert` and `kubectl` are installed (`brew install go mkcert kubectl`).
+- `kubectl` can reach the target cluster: `kubectl config get-contexts` lists it and `kubectl --context <ctx> get svc -n <namespace>` works. For GKE that means `gcloud auth login` followed by `gcloud container clusters get-credentials <cluster> --region <region> --project <project>`.
+- You may port-forward in the target namespace: `kubectl --context <ctx> auth can-i create pods/portforward -n <namespace>` answers `yes`.
+- The gcloud auth plugin is reachable from launchd's minimal `PATH`. The example config lists the usual Homebrew locations under `environment.path_additions`; adjust if `gcloud info --format='value(installation.sdk_root)'` says otherwise.
+
 ## Install
 
 ```bash
-git clone https://github.com/yourhandle/kubetunnel.git ~/kubetunnel
-cd ~/kubetunnel
+git clone https://github.com/asumaran/kubetunnel.git ~/Developer/kubetunnel
+cd ~/Developer/kubetunnel
 ./scripts/install.sh
 ```
 
@@ -129,6 +138,20 @@ From there, `kubetunneld` runs in the background as root, relaunches itself afte
 ./scripts/install-sudoers.sh
 ```
 This writes a `visudo`-validated snippet at `/etc/sudoers.d/kubetunnel-dev` that whitelists exactly the three commands `scripts/update.sh` needs (binary installs + `launchctl kickstart` for `system/dev.kubetunnel`). After that, `./scripts/update.sh` runs end-to-end without ever asking for a password.
+
+## Using it with an AI agent
+
+[`AGENTS.md`](./AGENTS.md) is written for AI coding agents (Claude Code, Codex, Cursor and the like): prerequisites to check, the step-by-step recipe to add a tunnel for a hostname (how to find the Service behind it, `path_prefix`/`strip_prefix`, the order `cert-install`, then `reload`, then `sudo tunnelctl install`), how to diagnose a tunnel that is not `Running`, and how to update. A prompt that gets a fresh agent going:
+
+```
+I use kubetunnel (https://github.com/asumaran/kubetunnel, cloned at ~/Developer/kubetunnel)
+to open internal Kubernetes URLs locally. Read AGENTS.md in that repo before doing
+anything. My kube context is <context>. I want https://<hostname>/ to work in my
+browser: find the Service behind that hostname in the cluster, add the tunnel to
+~/.config/kubetunnel/config.yaml, run cert-install and reload, and tell me the one
+sudo command I have to run myself. Verify with tunnelctl status and a curl that
+reports remote_ip=127.0.0.1.
+```
 
 ## Commands
 
