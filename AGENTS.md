@@ -58,8 +58,20 @@ kubectl --context <ctx> get svc -n <namespace>   # the target Service exists
 ```
 
 For GKE the kubeconfig entry comes from
-`gcloud container clusters get-credentials <cluster> --region <region> --project <project>`
-after `gcloud auth login`. The daemon runs under launchd with a minimal `PATH`,
+`gcloud container clusters get-credentials <cluster> --region <region> --project <project> --dns-endpoint`
+after `gcloud auth login`. Prefer the DNS endpoint (`--dns-endpoint`): it
+authenticates with the Google account, needs no VPN and keeps working when the
+cluster's public API server IP is closed. If a context for that cluster already
+exists, check which endpoint it uses before trusting it:
+`kubectl config view -o jsonpath='{.clusters[?(@.name=="<ctx>")].cluster.server}'`
+should print a `https://gke-<hash>.<region>.gke.goog` host. A private IP
+(`10.x`) only works from inside the cluster's VPC and times out from a laptop,
+VPN or not; a public IP stops answering the day the cluster closes it. Re-run
+`get-credentials` with `--dns-endpoint` to fix either: it overwrites the entry
+and keeps the context name, so `kube_context` in the tunnel config does not
+change and the daemon picks the new endpoint up on the next `kubectl` launch,
+without `tunnelctl reload`. If `gcloud` does not know the flag, run
+`gcloud components update`. The daemon runs under launchd with a minimal `PATH`,
 so the gcloud auth plugin must be reachable through `environment.path_additions`
 in the config (`/opt/homebrew/share/google-cloud-sdk/bin` on Apple Silicon
 Homebrew, `/usr/local/share/google-cloud-sdk/bin` on Intel). Check with
@@ -200,6 +212,7 @@ tunnelctl debug --name <name>
 
 | Symptom in logs | Cause | Fix |
 |---|---|---|
+| `kubectl` times out (`i/o timeout`) and `kubectl config view -o jsonpath='{.clusters[?(@.name=="<ctx>")].cluster.server}'` prints an IP instead of a `*.gke.goog` host | the kubeconfig points at the cluster's private endpoint (`10.x`, reachable only from inside its VPC) or at a public IP the cluster has closed | regenerate the context against the DNS endpoint: `get-credentials ... --dns-endpoint` (same context name, no config change) |
 | `You must be logged in to the server` | cloud auth expired | `gcloud auth login` (or the provider's equivalent); backoff retries on its own |
 | `executable gke-gcloud-auth-plugin not found` | launchd `PATH` lacks the SDK | add the SDK `bin` dir to `environment.path_additions`, `tunnelctl reload` |
 | `namespaces "<ns>" not found` / `services "<svc>" not found` | the target is gone (ephemeral PR environments expire) | remove the tunnel |

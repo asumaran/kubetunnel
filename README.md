@@ -112,7 +112,7 @@ The guiding principle: **the daemon never dies because of a bad tunnel**. Every 
 kubetunnel wraps the `kubectl` access you already have. Before installing, make sure that on this machine:
 
 - `go`, `mkcert` and `kubectl` are installed (`brew install go mkcert kubectl`).
-- `kubectl` can reach the target cluster: `kubectl config get-contexts` lists it and `kubectl --context <ctx> get svc -n <namespace>` works. For GKE that means `gcloud auth login` followed by `gcloud container clusters get-credentials <cluster> --region <region> --project <project>`.
+- `kubectl` can reach the target cluster: `kubectl config get-contexts` lists it and `kubectl --context <ctx> get svc -n <namespace>` works. For GKE that means `gcloud auth login` followed by `gcloud container clusters get-credentials <cluster> --region <region> --project <project> --dns-endpoint`. The DNS endpoint needs no VPN and keeps working when the cluster closes its public API server IP; re-running the command on an existing context keeps its name, so the tunnel config does not change.
 - You may port-forward in the target namespace: `kubectl --context <ctx> auth can-i create pods/portforward -n <namespace>` answers `yes`.
 - The gcloud auth plugin is reachable from launchd's minimal `PATH`. The example config lists the usual Homebrew locations under `environment.path_additions`; adjust if `gcloud info --format='value(installation.sdk_root)'` says otherwise.
 
