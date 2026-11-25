@@ -19,7 +19,7 @@ import (
 func Send(title, message string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	cmd, err := command(ctx, os.Geteuid(), consoleUID, title, message)
+	cmd, err := command(ctx, os.Geteuid(), consoleUID, findTerminalNotifier(), title, message)
 	if err != nil {
 		return err
 	}
@@ -29,14 +29,47 @@ func Send(title, message string) error {
 	return nil
 }
 
-// command builds the osascript invocation. As root it runs inside the console
-// user's launchd session and as that user, which is what makes the
-// notification reach their Notification Center.
-func command(ctx context.Context, euid int, consoleUID func() (int, error), title, message string) (*exec.Cmd, error) {
-	script := fmt.Sprintf(`display notification %s with title %s sound name "Basso"`,
-		appleScriptString(message), appleScriptString(title))
+// terminalNotifierPaths are checked after PATH: launchd gives the daemon a
+// minimal PATH that may not include Homebrew.
+var terminalNotifierPaths = []string{
+	"/opt/homebrew/bin/terminal-notifier",
+	"/usr/local/bin/terminal-notifier",
+}
+
+// findTerminalNotifier returns the path of terminal-notifier, or "" when it
+// is not installed.
+func findTerminalNotifier() string {
+	if p, err := exec.LookPath("terminal-notifier"); err == nil {
+		return p
+	}
+	for _, p := range terminalNotifierPaths {
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			return p
+		}
+	}
+	return ""
+}
+
+// command builds the invocation that posts the notification. As root it runs
+// inside the console user's launchd session and as that user, which is what
+// makes the notification reach their Notification Center.
+//
+// terminal-notifier is preferred when installed (notifier is its path): a
+// notification posted through osascript belongs to Script Editor, so clicking
+// it launches Script Editor and its open-file dialog. One from
+// terminal-notifier is simply dismissed on click.
+func command(ctx context.Context, euid int, consoleUID func() (int, error), notifier, title, message string) (*exec.Cmd, error) {
+	var argv []string
+	if notifier != "" {
+		argv = []string{notifier, "-title", title, "-message", message,
+			"-sound", "Basso", "-group", "kubetunnel"}
+	} else {
+		script := fmt.Sprintf(`display notification %s with title %s sound name "Basso"`,
+			appleScriptString(message), appleScriptString(title))
+		argv = []string{"/usr/bin/osascript", "-e", script}
+	}
 	if euid != 0 {
-		return exec.CommandContext(ctx, "/usr/bin/osascript", "-e", script), nil
+		return exec.CommandContext(ctx, argv[0], argv[1:]...), nil
 	}
 	uid, err := consoleUID()
 	if err != nil {
@@ -46,8 +79,8 @@ func command(ctx context.Context, euid int, consoleUID func() (int, error), titl
 		return nil, fmt.Errorf("no user logged in at the console")
 	}
 	id := strconv.Itoa(uid)
-	return exec.CommandContext(ctx, "/bin/launchctl", "asuser", id,
-		"/usr/bin/sudo", "-u", "#"+id, "/usr/bin/osascript", "-e", script), nil
+	args := append([]string{"asuser", id, "/usr/bin/sudo", "-u", "#" + id}, argv...)
+	return exec.CommandContext(ctx, "/bin/launchctl", args...), nil
 }
 
 // consoleUID returns the uid of the user that owns the console, i.e. the one
