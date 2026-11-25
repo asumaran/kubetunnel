@@ -17,9 +17,24 @@ import (
 // Send shows a macOS notification with a sound. It returns an error when no
 // user is logged in at the console or the notification could not be posted.
 func Send(title, message string) error {
+	notifier := findTerminalNotifier()
+	err := send(notifier, title, message)
+	if err != nil && notifier != "" {
+		// terminal-notifier is installed but unusable (typically its
+		// notifications are not allowed yet in System Settings): a
+		// notification with an awkward click beats no notification.
+		if fallbackErr := send("", title, message); fallbackErr != nil {
+			return fmt.Errorf("%w; osascript fallback: %v", err, fallbackErr)
+		}
+		return nil
+	}
+	return err
+}
+
+func send(notifier, title, message string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	cmd, err := command(ctx, os.Geteuid(), consoleUID, findTerminalNotifier(), title, message)
+	cmd, err := command(ctx, os.Geteuid(), consoleUID, notifier, title, message)
 	if err != nil {
 		return err
 	}
