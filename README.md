@@ -99,7 +99,7 @@ sequenceDiagram
 | Failure | What kubetunnel does |
 |---|---|
 | `kubectl` exits (pod rescheduled, network blip) | Supervisor catches the exit, logs it, enters **Backoff** for 1→60s (exponential with jitter), then re-spawns. |
-| Cloud credentials expire (`gcloud` asks to log in again) | Every tunnel of that kube context enters **AuthRequired** and stops spawning `kubectl`; you get a desktop notification. One tunnel probes every 2 min, and all of them resume on their own once you log in (`tunnelctl restart <name>` resumes right away). |
+| Cloud credentials expire (`gcloud` asks to log in again) | Every tunnel of that kube context enters **AuthRequired** and stops spawning `kubectl`; you get a desktop notification, and clicking it runs `notifications.on_auth_required_click` (e.g. `gcloud auth login && tunnelctl resume`). One tunnel probes every 2 min, so they also resume on their own once you log in. |
 | Health-check fails N times in a row (configurable) | Supervisor kills the `kubectl` child and re-spawns from scratch. |
 | `kubectl` keeps crashing (>10 restarts / 60s) | Tunnel enters **Failing**, pauses for 5 min, then retries. Other tunnels keep running. |
 | A request arrives while a tunnel is reconnecting | Proxy returns a friendly HTML `503 Service Unavailable` with a `Retry-After`. Browser auto-retries and it just works a second later. |

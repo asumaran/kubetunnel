@@ -51,12 +51,44 @@ func (d *daemon) Reload() error {
 	return nil
 }
 
-func (d *daemon) Notify(title, message string) error {
-	err := notify.Send(title, message)
+func (d *daemon) Notify(n notify.Notification) error {
+	err := notify.Send(n)
 	if err != nil {
 		d.logger.Daemon("warn", "", "notify_failed", err.Error(), nil)
 	}
 	return err
+}
+
+// notice turns a supervisor notice into a desktop notification, attaching
+// the click action the config defines for it.
+func (d *daemon) notice(n supervisor.Notice) {
+	out := notify.Notification{Title: n.Title, Message: n.Message}
+	if n.Kind == supervisor.NoticeAuthRequired {
+		out.OnClick = d.Config().Notifications.OnAuthRequiredClick
+		if out.OnClick != "" && notify.TerminalNotifier() != "" {
+			out.Message += " Click to log in."
+		}
+	}
+	_ = d.Notify(out)
+}
+
+func (d *daemon) NotifyTest() error {
+	n := notify.Notification{
+		Title:   "kubetunnel: test notification",
+		Message: "This is how you will be told when tunnels pause for a login.",
+	}
+	if tn := notify.TerminalNotifier(); tn != "" {
+		n.Message += " Click to test the click action."
+		n.OnClick = tn + ` -title "kubetunnel" -message "The click action works." -group kubetunnel-click`
+	}
+	return d.Notify(n)
+}
+
+func (d *daemon) ResumeAuth() int {
+	n := d.sup.ResumeAuth()
+	d.logger.Daemon("info", "", "auth_resume", "resuming tunnels paused for credentials",
+		map[string]any{"contexts": n})
+	return n
 }
 
 func (d *daemon) Shutdown() {
@@ -127,7 +159,7 @@ func main() {
 		shutdown:   cancel,
 	}
 
-	sup.SetNotifier(func(title, message string) { _ = d.Notify(title, message) })
+	sup.SetNotifier(d.notice)
 
 	// Control server.
 	ctrl := control.NewServer(d, cfg.Control.Socket)

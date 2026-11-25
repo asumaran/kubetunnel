@@ -107,6 +107,17 @@ func (c *Client) Shutdown() error {
 	return nil
 }
 
+// Resume releases tunnels paused for rejected credentials.
+func (c *Client) Resume() error {
+	req, _ := http.NewRequest("POST", c.url("/resume", nil), nil)
+	resp, err := c.do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
+}
+
 // NotifyTest asks the daemon to post a test desktop notification.
 func (c *Client) NotifyTest() error {
 	req, _ := http.NewRequest("POST", c.url("/notify-test", nil), nil)

@@ -8,7 +8,7 @@ import (
 )
 
 func TestCommandAsUserRunsOsascriptDirectly(t *testing.T) {
-	cmd, err := command(context.Background(), 501, nil, "", "kubetunnel", `say "hi"`)
+	cmd, err := command(context.Background(), 501, nil, "", Notification{Title: "kubetunnel", Message: `say "hi"`})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +22,7 @@ func TestCommandAsUserRunsOsascriptDirectly(t *testing.T) {
 }
 
 func TestCommandAsRootTargetsConsoleUser(t *testing.T) {
-	cmd, err := command(context.Background(), 0, func() (int, error) { return 501, nil }, "", "t", "m")
+	cmd, err := command(context.Background(), 0, func() (int, error) { return 501, nil }, "", Notification{Title: "t", Message: "m"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,17 +34,17 @@ func TestCommandAsRootTargetsConsoleUser(t *testing.T) {
 }
 
 func TestCommandAsRootWithoutConsoleUser(t *testing.T) {
-	if _, err := command(context.Background(), 0, func() (int, error) { return 0, nil }, "", "t", "m"); err == nil {
+	if _, err := command(context.Background(), 0, func() (int, error) { return 0, nil }, "", Notification{Title: "t", Message: "m"}); err == nil {
 		t.Error("expected an error when nobody is logged in")
 	}
-	if _, err := command(context.Background(), 0, func() (int, error) { return 0, fmt.Errorf("boom") }, "", "t", "m"); err == nil {
+	if _, err := command(context.Background(), 0, func() (int, error) { return 0, fmt.Errorf("boom") }, "", Notification{Title: "t", Message: "m"}); err == nil {
 		t.Error("expected the console lookup error to surface")
 	}
 }
 
 func TestCommandPrefersTerminalNotifier(t *testing.T) {
 	const tn = "/opt/homebrew/bin/terminal-notifier"
-	cmd, err := command(context.Background(), 0, func() (int, error) { return 501, nil }, tn, "the title", "the message")
+	cmd, err := command(context.Background(), 0, func() (int, error) { return 501, nil }, tn, Notification{Title: "the title", Message: "the message"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,5 +56,32 @@ func TestCommandPrefersTerminalNotifier(t *testing.T) {
 	}
 	if strings.Contains(got, "osascript") {
 		t.Error("osascript must not be used when terminal-notifier is available")
+	}
+}
+
+func TestCommandRunsOnClickInLoginShell(t *testing.T) {
+	const tn = "/opt/homebrew/bin/terminal-notifier"
+	cmd, err := command(context.Background(), 501, nil, tn,
+		Notification{Title: "t", Message: "m", OnClick: "echo 'it works' && true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := len(cmd.Args)
+	if cmd.Args[n-2] != "-execute" {
+		t.Fatalf("expected -execute, got %v", cmd.Args)
+	}
+	want := `/bin/zsh -lc 'echo '\''it works'\'' && true'`
+	if cmd.Args[n-1] != want {
+		t.Errorf("got %q, want %q", cmd.Args[n-1], want)
+	}
+
+	// Without terminal-notifier there is no click action to attach.
+	cmd, err = command(context.Background(), 501, nil, "",
+		Notification{Title: "t", Message: "m", OnClick: "echo hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(cmd.Args, " "), "echo hi") {
+		t.Errorf("osascript fallback must ignore OnClick: %v", cmd.Args)
 	}
 }

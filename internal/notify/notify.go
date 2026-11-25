@@ -14,16 +14,30 @@ import (
 	"time"
 )
 
+// Notification is what Send shows.
+type Notification struct {
+	Title   string
+	Message string
+	// OnClick is a shell command run in the user's login shell when they click
+	// the notification. It needs terminal-notifier; without it the click does
+	// whatever the fallback's click does.
+	OnClick string
+}
+
+// TerminalNotifier returns the path of terminal-notifier, or "" when it is
+// not installed.
+func TerminalNotifier() string { return findTerminalNotifier() }
+
 // Send shows a macOS notification with a sound. It returns an error when no
 // user is logged in at the console or the notification could not be posted.
-func Send(title, message string) error {
+func Send(n Notification) error {
 	notifier := findTerminalNotifier()
-	err := send(notifier, title, message)
+	err := send(notifier, n)
 	if err != nil && notifier != "" {
 		// terminal-notifier is installed but unusable (typically its
 		// notifications are not allowed yet in System Settings): a
 		// notification with an awkward click beats no notification.
-		if fallbackErr := send("", title, message); fallbackErr != nil {
+		if fallbackErr := send("", n); fallbackErr != nil {
 			return fmt.Errorf("%w; osascript fallback: %v", err, fallbackErr)
 		}
 		return nil
@@ -31,10 +45,10 @@ func Send(title, message string) error {
 	return err
 }
 
-func send(notifier, title, message string) error {
+func send(notifier string, n Notification) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	cmd, err := command(ctx, os.Geteuid(), consoleUID, notifier, title, message)
+	cmd, err := command(ctx, os.Geteuid(), consoleUID, notifier, n)
 	if err != nil {
 		return err
 	}
@@ -73,14 +87,19 @@ func findTerminalNotifier() string {
 // notification posted through osascript belongs to Script Editor, so clicking
 // it launches Script Editor and its open-file dialog. One from
 // terminal-notifier is simply dismissed on click.
-func command(ctx context.Context, euid int, consoleUID func() (int, error), notifier, title, message string) (*exec.Cmd, error) {
+func command(ctx context.Context, euid int, consoleUID func() (int, error), notifier string, n Notification) (*exec.Cmd, error) {
 	var argv []string
 	if notifier != "" {
-		argv = []string{notifier, "-title", title, "-message", message,
+		argv = []string{notifier, "-title", n.Title, "-message", n.Message,
 			"-sound", "Basso", "-group", "kubetunnel"}
+		if n.OnClick != "" {
+			// The click is handled from the GUI session, whose PATH is the
+			// bare system one: a login shell gives the command the user's.
+			argv = append(argv, "-execute", "/bin/zsh -lc "+shellQuote(n.OnClick))
+		}
 	} else {
 		script := fmt.Sprintf(`display notification %s with title %s sound name "Basso"`,
-			appleScriptString(message), appleScriptString(title))
+			appleScriptString(n.Message), appleScriptString(n.Title))
 		argv = []string{"/usr/bin/osascript", "-e", script}
 	}
 	if euid != 0 {
@@ -118,4 +137,9 @@ func appleScriptString(s string) string {
 	s = strings.ReplaceAll(s, `"`, `\"`)
 	s = strings.ReplaceAll(s, "\n", " ")
 	return `"` + s + `"`
+}
+
+// shellQuote quotes s as a single POSIX shell word.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

@@ -297,3 +297,49 @@ func TestBackoffGrowsAfterTunnelWasEverRunning(t *testing.T) {
 	}
 	t.Fatalf("restart counter stuck at %d: backoff is being reset on every failure", r.Status().Restarts)
 }
+
+// ResumeAuth releases the paused context and the user is told about both the
+// pause and the recovery.
+func TestSupervisorResumeAuthAndNotices(t *testing.T) {
+	logger := newTestLogger(t)
+	var spawns atomic.Int64
+	var fixed atomic.Bool
+	s := New(logger, countingExecer{spawns: &spawns, script: func() string {
+		if fixed.Load() {
+			return "printf 'Forwarding from 127.0.0.1:19001\\n'; sleep 60"
+		}
+		return authFailScript
+	}})
+	s.gate = newAuthGate(time.Hour)
+	notices := make(chan Notice, 10)
+	s.SetNotifier(func(n Notice) { notices <- n })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx, twoTunnelConfig()); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Stop()
+
+	waitForState(t, s, "foo", StateAuthRequired, 3*time.Second)
+	waitForState(t, s, "bar", StateAuthRequired, 3*time.Second)
+	select {
+	case n := <-notices:
+		if n.Kind != NoticeAuthRequired || n.KubeContext != "fake" {
+			t.Errorf("unexpected notice: %+v", n)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no notice when the context was paused")
+	}
+
+	fixed.Store(true)
+	if got := s.ResumeAuth(); got != 1 {
+		t.Errorf("ResumeAuth() = %d, want 1 paused context", got)
+	}
+	waitForState(t, s, "foo", StateRunning, 3*time.Second)
+	waitForState(t, s, "bar", StateRunning, 3*time.Second)
+	select {
+	case n := <-notices:
+		t.Errorf("only one notice expected for the pause, got another: %+v", n)
+	default:
+	}
+}

@@ -11,12 +11,21 @@ import (
 )
 
 type Config struct {
-	TLS         TLSConfig         `yaml:"tls"`
-	Control     ControlConfig     `yaml:"control"`
-	Logging     LoggingConfig     `yaml:"logging"`
-	AccessLog   AccessLogConfig   `yaml:"access_log"`
-	Environment EnvironmentConfig `yaml:"environment"`
-	Tunnels     []Tunnel          `yaml:"tunnels"`
+	TLS           TLSConfig           `yaml:"tls"`
+	Control       ControlConfig       `yaml:"control"`
+	Logging       LoggingConfig       `yaml:"logging"`
+	AccessLog     AccessLogConfig     `yaml:"access_log"`
+	Environment   EnvironmentConfig   `yaml:"environment"`
+	Notifications NotificationsConfig `yaml:"notifications"`
+	Tunnels       []Tunnel            `yaml:"tunnels"`
+}
+
+// NotificationsConfig tunes the desktop notifications the daemon posts.
+type NotificationsConfig struct {
+	// OnAuthRequiredClick is a shell command run in the user's login shell
+	// when they click the "login required" notification, e.g.
+	// "gcloud auth login && tunnelctl resume". Needs terminal-notifier.
+	OnAuthRequiredClick string `yaml:"on_auth_required_click"`
 }
 
 // EnvironmentConfig is applied to every subprocess the daemon spawns

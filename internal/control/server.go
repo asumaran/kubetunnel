@@ -25,8 +25,11 @@ type DaemonAPI interface {
 	Logger() *logging.Logger
 	Reload() error
 	Shutdown()
-	// Notify posts a desktop notification to the console user.
-	Notify(title, message string) error
+	// NotifyTest posts a test desktop notification to the console user.
+	NotifyTest() error
+	// ResumeAuth releases tunnels paused for rejected credentials and returns
+	// how many kube contexts were paused.
+	ResumeAuth() int
 }
 
 type Server struct {
@@ -64,6 +67,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/stop", s.handleStop)
 	mux.HandleFunc("/shutdown", s.handleShutdown)
 	mux.HandleFunc("/notify-test", s.handleNotifyTest)
+	mux.HandleFunc("/resume", s.handleResume)
 	mux.HandleFunc("/logs", s.handleLogs)
 	mux.HandleFunc("/logs/stream", s.handleLogsStream)
 	mux.HandleFunc("/events", s.handleEvents)
@@ -151,13 +155,20 @@ func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
+func (s *Server) handleResume(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, 405, "method not allowed")
+		return
+	}
+	writeJSON(w, 200, map[string]int{"contexts": s.api.ResumeAuth()})
+}
+
 func (s *Server) handleNotifyTest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, 405, "method not allowed")
 		return
 	}
-	if err := s.api.Notify("kubetunnel: test notification",
-		"This is how you will be told when tunnels pause for a login."); err != nil {
+	if err := s.api.NotifyTest(); err != nil {
 		writeError(w, 500, err.Error())
 		return
 	}

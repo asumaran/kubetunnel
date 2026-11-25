@@ -42,7 +42,7 @@ type authGate struct {
 	probeInterval time.Duration
 	// notify, when set, tells the user about a context being blocked or
 	// released. It is called from its own goroutine.
-	notify func(title, message string)
+	notify func(Notice)
 
 	mu       sync.Mutex
 	contexts map[string]*authGateEntry
@@ -127,8 +127,20 @@ func (g *authGate) clear(kubeContext string) bool {
 	return true
 }
 
-func (g *authGate) notifyUser(title, message string) {
+// clearAll unblocks every context and returns how many were blocked.
+func (g *authGate) clearAll() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	n := len(g.contexts)
+	for kc, e := range g.contexts {
+		close(e.cleared)
+		delete(g.contexts, kc)
+	}
+	return n
+}
+
+func (g *authGate) notifyUser(n Notice) {
 	if g.notify != nil {
-		go g.notify(title, message)
+		go g.notify(n)
 	}
 }

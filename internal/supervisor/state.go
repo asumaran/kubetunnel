@@ -19,6 +19,25 @@ const (
 	StateAuthRequired State = "AuthRequired"
 )
 
+// NoticeKind says what a Notice is about.
+type NoticeKind string
+
+const (
+	// NoticeAuthRequired: the tunnels of a kube context were paused because
+	// its credentials are rejected.
+	NoticeAuthRequired NoticeKind = "auth_required"
+	// NoticeAuthRecovered: the credentials work again and tunnels resumed.
+	NoticeAuthRecovered NoticeKind = "auth_recovered"
+)
+
+// Notice is something the user should be told about right away.
+type Notice struct {
+	Kind        NoticeKind
+	KubeContext string
+	Title       string
+	Message     string
+}
+
 // Status is a snapshot of a tunnel's state for the control API / TUI.
 type Status struct {
 	Name        string    `json:"name"`

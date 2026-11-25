@@ -36,8 +36,15 @@ func New(logger *logging.Logger, execer Execer) *Supervisor {
 // SetNotifier registers a function that tells the user when the tunnels of a
 // kube context are paused because its credentials are rejected, and when they
 // resume. Call it before Start.
-func (s *Supervisor) SetNotifier(notify func(title, message string)) {
+func (s *Supervisor) SetNotifier(notify func(Notice)) {
 	s.gate.notify = notify
+}
+
+// ResumeAuth releases every tunnel paused for rejected credentials so they
+// retry right away instead of waiting for the next probe. It returns how many
+// kube contexts were paused.
+func (s *Supervisor) ResumeAuth() int {
+	return s.gate.clearAll()
 }
 
 // Start launches all runners defined in cfg. Safe to call once.

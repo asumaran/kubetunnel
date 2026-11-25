@@ -417,9 +417,13 @@ func (t *tunnelRunner) authBlocked(wasProbe bool) {
 				"kube_context":  t.cfg.KubeContext,
 				"probe_every_s": int(t.gate.probeInterval.Seconds()),
 			})
-		t.gate.notifyUser("kubetunnel: login required",
-			fmt.Sprintf("Credentials rejected for %s. Tunnels are paused until you log in again (gcloud auth login).",
-				t.cfg.KubeContext))
+		t.gate.notifyUser(Notice{
+			Kind:        NoticeAuthRequired,
+			KubeContext: t.cfg.KubeContext,
+			Title:       "kubetunnel: login required",
+			Message: fmt.Sprintf("Credentials rejected for %s. Tunnels are paused until you log in again.",
+				t.cfg.KubeContext),
+		})
 	}
 }
 
@@ -433,8 +437,12 @@ func (t *tunnelRunner) authRecovered() {
 		t.logger.Daemon("info", t.cfg.Name, "auth_recovered",
 			"credentials work again — resuming tunnels",
 			map[string]any{"kube_context": t.cfg.KubeContext})
-		t.gate.notifyUser("kubetunnel: tunnels resumed",
-			fmt.Sprintf("Credentials for %s work again.", t.cfg.KubeContext))
+		t.gate.notifyUser(Notice{
+			Kind:        NoticeAuthRecovered,
+			KubeContext: t.cfg.KubeContext,
+			Title:       "kubetunnel: tunnels resumed",
+			Message:     fmt.Sprintf("Credentials for %s work again.", t.cfg.KubeContext),
+		})
 	}
 }
 

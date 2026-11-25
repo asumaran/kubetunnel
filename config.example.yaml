@@ -21,6 +21,14 @@ logging:
 access_log:
   enabled: true
 
+# Desktop notifications. The daemon tells you when the credentials of a kube
+# context are rejected (its tunnels pause until you log in again) and when
+# they work again. With terminal-notifier installed
+# (`brew install terminal-notifier`), clicking the "login required" one runs
+# this command in your login shell.
+notifications:
+  on_auth_required_click: "gcloud auth login && tunnelctl resume"
+
 # When the daemon runs under launchd (as root) it inherits a minimal PATH and
 # will not see tools installed under your user profile, e.g. the gcloud SDK
 # auth plugins. Prepend any extra directories kubectl needs here. These are

@@ -41,6 +41,7 @@ func main() {
 	root.AddCommand(reloadCmd())
 	root.AddCommand(shutdownCmd())
 	root.AddCommand(notifyTestCmd())
+	root.AddCommand(resumeCmd())
 	root.AddCommand(certInstallCmd())
 	root.AddCommand(installCmd())
 	root.AddCommand(uninstallCmd())
@@ -191,6 +192,16 @@ func shutdownCmd() *cobra.Command {
 		Short: "Shutdown the daemon (launchd will relaunch it)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return client().Shutdown()
+		},
+	}
+}
+
+func resumeCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "resume",
+		Short: "Retry now the tunnels paused for rejected credentials (after logging in again)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return client().Resume()
 		},
 	}
 }
