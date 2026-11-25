@@ -620,7 +620,7 @@ func (m *model) footerView() string {
 func columns(tableW int) []table.Column {
 	const (
 		nameW     = 18
-		stateW    = 9
+		stateW    = 12
 		uptimeW   = 9
 		restartsW = 8
 		healthW   = 6

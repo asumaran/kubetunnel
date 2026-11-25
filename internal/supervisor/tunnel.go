@@ -25,6 +25,8 @@ type tunnelRunner struct {
 	cfg    config.Tunnel
 	logger *logging.Logger
 	execer Execer
+	// gate is shared by every tunnel of the supervisor; nil disables it.
+	gate *authGate
 
 	mu         sync.RWMutex
 	state      State
@@ -63,7 +65,14 @@ func (k KubectlExecer) Command(ctx context.Context, t config.Tunnel) *exec.Cmd {
 		t.Target,
 		portArg,
 	)
+	// kubectl runs in its own process group and is killed as a group: its
+	// credential helper (gke-gcloud-auth-plugin, which runs gcloud) would
+	// otherwise outlive it and pile up when kubectl is killed mid-auth.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 5 * time.Second
 	cmd.Env = buildEnv(k.Env)
 	return cmd
 }
@@ -136,6 +145,10 @@ func (t *tunnelRunner) Run(ctx context.Context) {
 // runOnce tries to start kubectl once and blocks until it exits. Then applies
 // backoff or failing state as needed.
 func (t *tunnelRunner) runOnce(ctx context.Context) {
+	isProbe, ok := t.awaitAuth(ctx)
+	if !ok {
+		return
+	}
 	t.setState(StateStarting)
 	t.logger.Daemon("info", t.cfg.Name, "starting", "launching kubectl port-forward",
 		map[string]any{"local_port": t.cfg.LocalPort, "target": t.cfg.Target})
@@ -167,7 +180,14 @@ func (t *tunnelRunner) runOnce(ctx context.Context) {
 
 	readyCh := make(chan struct{}, 1)
 	go t.drainStdout(stdout, readyCh)
-	go t.drainStderr(stderr)
+	var authFailed atomic.Bool
+	stderrDone := make(chan struct{})
+	go func() {
+		defer close(stderrDone)
+		t.drainStderr(stderr, &authFailed)
+	}()
+	// readyAt is when this run became Running; zero if it never did.
+	var readyAt time.Time
 
 	// Wait for either: readiness, restart request, stop, or process exit.
 	waitCh := make(chan error, 1)
@@ -206,10 +226,12 @@ waitLoop:
 			return
 		case <-readyCh:
 			t.setState(StateRunning)
+			readyAt = time.Now()
 			t.mu.Lock()
-			t.startedAt = time.Now()
+			t.startedAt = readyAt
 			t.healthOK = true
 			t.mu.Unlock()
+			t.authRecovered()
 			t.logger.Daemon("info", t.cfg.Name, "ready", "tunnel ready",
 				map[string]any{"pid": t.pid})
 			readyCh = nil
@@ -263,12 +285,32 @@ waitLoop:
 		}
 	}
 
-	// If the tunnel had been Running long enough we reset backoff.
+	// If this run had been Running long enough we reset backoff. It has to be
+	// this run's own uptime: startedAt survives across runs, so judging by it
+	// would reset the backoff on every failure of a tunnel that ever worked.
 	t.mu.Lock()
-	if !t.startedAt.IsZero() && time.Since(t.startedAt) > 5*time.Minute {
+	if !readyAt.IsZero() && time.Since(readyAt) > 5*time.Minute {
 		t.restarts = 0
 	}
 	t.mu.Unlock()
+
+	if readyAt.IsZero() && t.gate != nil {
+		// kubectl closes stderr on exit; give the reader a moment to see the
+		// last lines before deciding why the run failed.
+		select {
+		case <-stderrDone:
+		case <-time.After(time.Second):
+		}
+		if authFailed.Load() {
+			t.authBlocked(isProbe)
+			return
+		}
+		if isProbe {
+			// The probe failed for another reason, so credentials are no
+			// longer what is wrong: back to normal restarts with backoff.
+			t.gate.clear(t.cfg.KubeContext)
+		}
+	}
 
 	if t.tooManyRestarts() {
 		t.setState(StateFailing)
@@ -306,12 +348,93 @@ func (t *tunnelRunner) drainStdout(r io.Reader, readyCh chan struct{}) {
 	}
 }
 
-func (t *tunnelRunner) drainStderr(r io.Reader) {
+func (t *tunnelRunner) drainStderr(r io.Reader, authFailed *atomic.Bool) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 512*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		t.logger.Kubectl(t.cfg.Name, "[stderr] "+line)
+		if isAuthFailure(line) {
+			authFailed.Store(true)
+		}
+	}
+}
+
+// awaitAuth holds the tunnel while the credentials of its kube context are
+// known to be rejected. It returns ok=false when the runner has to stop, and
+// isProbe=true when this start is the single attempt let through to check
+// whether the credentials work again.
+func (t *tunnelRunner) awaitAuth(ctx context.Context) (isProbe, ok bool) {
+	if t.gate == nil {
+		return false, true
+	}
+	for {
+		open, probe, cleared, wait := t.gate.admit(t.cfg.KubeContext)
+		if open {
+			return false, true
+		}
+		if probe {
+			t.logger.Daemon("info", t.cfg.Name, "auth_probe",
+				"checking whether credentials work again",
+				map[string]any{"kube_context": t.cfg.KubeContext})
+			return true, true
+		}
+		t.setState(StateAuthRequired)
+		select {
+		case <-ctx.Done():
+			return false, false
+		case <-t.stopCh:
+			return false, false
+		case <-t.restartCh:
+			// A manual restart means the user believes credentials are back:
+			// release every tunnel of the context, not just this one.
+			t.logger.Daemon("info", t.cfg.Name, "restart_requested",
+				"manual restart — retrying credentials", nil)
+			t.mu.Lock()
+			t.restarts = 0
+			t.recentRestarts = nil
+			t.mu.Unlock()
+			t.gate.clear(t.cfg.KubeContext)
+		case <-cleared:
+		case <-time.After(wait):
+		}
+	}
+}
+
+// authBlocked records that this run failed because the credentials of the
+// kube context were rejected, and blocks the context.
+func (t *tunnelRunner) authBlocked(wasProbe bool) {
+	msg := fmt.Sprintf("credentials rejected for kube context %s — log in again (e.g. `gcloud auth login`)",
+		t.cfg.KubeContext)
+	t.mu.Lock()
+	t.lastError = msg
+	t.mu.Unlock()
+	t.setState(StateAuthRequired)
+	if t.gate.trip(t.cfg.KubeContext, wasProbe) {
+		t.logger.Daemon("error", t.cfg.Name, "auth_required",
+			msg+"; pausing every tunnel of this context",
+			map[string]any{
+				"kube_context":  t.cfg.KubeContext,
+				"probe_every_s": int(t.gate.probeInterval.Seconds()),
+			})
+		t.gate.notifyUser("kubetunnel: login required",
+			fmt.Sprintf("Credentials rejected for %s. Tunnels are paused until you log in again (gcloud auth login).",
+				t.cfg.KubeContext))
+	}
+}
+
+// authRecovered unblocks the kube context once a tunnel proves the
+// credentials are no longer the problem.
+func (t *tunnelRunner) authRecovered() {
+	if t.gate == nil {
+		return
+	}
+	if t.gate.clear(t.cfg.KubeContext) {
+		t.logger.Daemon("info", t.cfg.Name, "auth_recovered",
+			"credentials work again — resuming tunnels",
+			map[string]any{"kube_context": t.cfg.KubeContext})
+		t.gate.notifyUser("kubetunnel: tunnels resumed",
+			fmt.Sprintf("Credentials for %s work again.", t.cfg.KubeContext))
 	}
 }
 

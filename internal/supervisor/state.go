@@ -14,6 +14,9 @@ const (
 	StateRunning  State = "Running"
 	StateBackoff  State = "Backoff"
 	StateFailing  State = "Failing"
+	// StateAuthRequired means the credentials of the tunnel's kube context are
+	// rejected: the tunnel is paused until they work again.
+	StateAuthRequired State = "AuthRequired"
 )
 
 // Status is a snapshot of a tunnel's state for the control API / TUI.

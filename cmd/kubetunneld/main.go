@@ -15,6 +15,7 @@ import (
 	"github.com/asumaran/kubetunnel/internal/config"
 	"github.com/asumaran/kubetunnel/internal/control"
 	"github.com/asumaran/kubetunnel/internal/logging"
+	"github.com/asumaran/kubetunnel/internal/notify"
 	"github.com/asumaran/kubetunnel/internal/proxy"
 	"github.com/asumaran/kubetunnel/internal/supervisor"
 )
@@ -48,6 +49,14 @@ func (d *daemon) Reload() error {
 	}
 	d.logger.Daemon("info", "", "reload", "config reloaded", nil)
 	return nil
+}
+
+func (d *daemon) Notify(title, message string) error {
+	err := notify.Send(title, message)
+	if err != nil {
+		d.logger.Daemon("warn", "", "notify_failed", err.Error(), nil)
+	}
+	return err
 }
 
 func (d *daemon) Shutdown() {
@@ -117,6 +126,8 @@ func main() {
 		prx:        prx,
 		shutdown:   cancel,
 	}
+
+	sup.SetNotifier(func(title, message string) { _ = d.Notify(title, message) })
 
 	// Control server.
 	ctrl := control.NewServer(d, cfg.Control.Socket)

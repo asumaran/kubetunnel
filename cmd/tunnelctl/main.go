@@ -40,6 +40,7 @@ func main() {
 	root.AddCommand(restartCmd())
 	root.AddCommand(reloadCmd())
 	root.AddCommand(shutdownCmd())
+	root.AddCommand(notifyTestCmd())
 	root.AddCommand(certInstallCmd())
 	root.AddCommand(installCmd())
 	root.AddCommand(uninstallCmd())
@@ -190,6 +191,20 @@ func shutdownCmd() *cobra.Command {
 		Short: "Shutdown the daemon (launchd will relaunch it)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return client().Shutdown()
+		},
+	}
+}
+
+func notifyTestCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "notify-test",
+		Short: "Ask the daemon to post a test desktop notification",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := client().NotifyTest(); err != nil {
+				return err
+			}
+			fmt.Println("notification sent")
+			return nil
 		},
 	}
 }

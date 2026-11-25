@@ -14,6 +14,7 @@ import (
 type Supervisor struct {
 	logger *logging.Logger
 	execer Execer
+	gate   *authGate
 
 	mu      sync.RWMutex
 	runners map[string]*tunnelRunner
@@ -26,9 +27,17 @@ func New(logger *logging.Logger, execer Execer) *Supervisor {
 	return &Supervisor{
 		logger:  logger,
 		execer:  execer,
+		gate:    newAuthGate(defaultAuthProbeInterval),
 		runners: make(map[string]*tunnelRunner),
 		cancels: make(map[string]context.CancelFunc),
 	}
+}
+
+// SetNotifier registers a function that tells the user when the tunnels of a
+// kube context are paused because its credentials are rejected, and when they
+// resume. Call it before Start.
+func (s *Supervisor) SetNotifier(notify func(title, message string)) {
+	s.gate.notify = notify
 }
 
 // Start launches all runners defined in cfg. Safe to call once.
@@ -48,6 +57,7 @@ func (s *Supervisor) Start(ctx context.Context, cfg *config.Config) error {
 
 func (s *Supervisor) startTunnelLocked(t config.Tunnel) {
 	runner := newTunnelRunner(t, s.logger, s.execer)
+	runner.gate = s.gate
 	childCtx, cancel := context.WithCancel(s.ctx)
 	s.runners[t.Name] = runner
 	s.cancels[t.Name] = cancel

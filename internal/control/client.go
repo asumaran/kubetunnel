@@ -107,6 +107,17 @@ func (c *Client) Shutdown() error {
 	return nil
 }
 
+// NotifyTest asks the daemon to post a test desktop notification.
+func (c *Client) NotifyTest() error {
+	req, _ := http.NewRequest("POST", c.url("/notify-test", nil), nil)
+	resp, err := c.do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
+}
+
 // Logs fetches the last `tail` entries matching filter. name can be empty.
 func (c *Client) Logs(name, filter string, tail int) (*LogResponse, error) {
 	q := url.Values{}
